@@ -1,0 +1,156 @@
+basePath: /
+definitions:
+  http.createOrderRequest:
+    properties:
+      amount:
+        type: integer
+      customer_id:
+        type: string
+      item_name:
+        type: string
+    required:
+    - amount
+    - customer_id
+    - item_name
+    type: object
+  http.errorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  http.orderResponse:
+    properties:
+      amount:
+        type: integer
+      created_at:
+        type: string
+      customer_id:
+        type: string
+      id:
+        type: string
+      item_name:
+        type: string
+      status:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: Manages customer orders. Calls Payment Service via REST to authorize
+    payments.
+  title: Order Service API
+  version: "1.0"
+paths:
+  /orders:
+    post:
+      consumes:
+      - application/json
+      description: Creates an order, calls Payment Service to authorize, and returns
+        the final status.
+      parameters:
+      - description: Unique key to prevent duplicate orders
+        in: header
+        name: Idempotency-Key
+        type: string
+      - description: Order payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.createOrderRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.orderResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+      summary: Create a new order
+      tags:
+      - orders
+  /orders/{id}:
+    get:
+      description: Returns order details from the database.
+      parameters:
+      - description: Order ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.orderResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+      summary: Get order by ID
+      tags:
+      - orders
+  /orders/{id}/cancel:
+    patch:
+      description: Cancels a Pending order. Paid orders cannot be cancelled.
+      parameters:
+      - description: Order ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.orderResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+      summary: Cancel an order
+      tags:
+      - orders
+  /orders/pending:
+    post:
+      consumes:
+      - application/json
+      description: Creates an order but intentionally skips payment — always returns
+        Pending status.
+      parameters:
+      - description: Order payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.createOrderRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/http.orderResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+      summary: Create order that stays Pending (for cancel testing)
+      tags:
+      - orders
+swagger: "2.0"
