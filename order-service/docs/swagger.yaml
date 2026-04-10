@@ -33,10 +33,17 @@ definitions:
       status:
         type: string
     type: object
+  http.updateStatusRequest:
+    properties:
+      status:
+        type: string
+    required:
+    - status
+    type: object
 host: localhost:8080
 info:
   contact: {}
-  description: Manages customer orders. Calls Payment Service via REST to authorize
+  description: Manages customer orders. Calls Payment Service via gRPC to authorize
     payments.
   title: Order Service API
   version: "1.0"
@@ -124,6 +131,42 @@ paths:
           schema:
             $ref: '#/definitions/http.errorResponse'
       summary: Cancel an order
+      tags:
+      - orders
+  /orders/{id}/status:
+    patch:
+      consumes:
+      - application/json
+      description: Manually updates the order status. Triggers real-time streaming
+        updates to subscribers.
+      parameters:
+      - description: Order ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: New status
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/http.updateStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/http.orderResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/http.errorResponse'
+      summary: Update order status
       tags:
       - orders
   /orders/pending:

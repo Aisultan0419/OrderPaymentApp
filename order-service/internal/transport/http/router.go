@@ -17,6 +17,7 @@ func NewRouter(h *Handler) *gin.Engine {
 		v1.POST("/orders", h.CreateOrder)
 		v1.GET("/orders/:id", h.GetOrder)
 		v1.PATCH("/orders/:id/cancel", h.CancelOrder)
+		v1.PATCH("/orders/:id/status", h.UpdateOrderStatus)
 	}
 
 	return r

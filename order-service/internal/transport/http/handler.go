@@ -169,3 +169,39 @@ func (h *Handler) CreatePendingOrder(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, toOrderResponse(order))
 }
+
+type updateStatusRequest struct {
+	Status string `json:"status" binding:"required"`
+}
+
+// UpdateOrderStatus godoc
+// @Summary      Update order status
+// @Description  Manually updates the order status. Triggers real-time streaming updates to subscribers.
+// @Tags         orders
+// @Accept       json
+// @Produce      json
+// @Param        id      path      string              true  "Order ID"
+// @Param        request body      updateStatusRequest true  "New status"
+// @Success      200     {object}  orderResponse
+// @Failure      400     {object}  errorResponse
+// @Failure      404     {object}  errorResponse
+// @Router       /orders/{id}/status [patch]
+func (h *Handler) UpdateOrderStatus(c *gin.Context) {
+	var req updateStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
+	order, err := h.uc.UpdateStatus(c.Request.Context(), c.Param("id"), req.Status)
+	if err != nil {
+		if errors.Is(err, domain.ErrOrderNotFound) {
+			c.JSON(http.StatusNotFound, errorResponse{Error: "order not found"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, toOrderResponse(order))
+}

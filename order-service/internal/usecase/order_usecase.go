@@ -84,3 +84,14 @@ func (uc *OrderUseCase) CancelOrder(ctx context.Context, id string) (*domain.Ord
 
 	return order, nil
 }
+func (uc *OrderUseCase) UpdateStatus(ctx context.Context, id, newStatus string) (*domain.Order, error) {
+	order, err := uc.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := uc.repo.UpdateStatus(ctx, order.ID, newStatus); err != nil {
+		return nil, err
+	}
+	order.Status = newStatus
+	return order, nil
+}
