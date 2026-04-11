@@ -22,6 +22,7 @@ import (
 	pb "github.com/Aisultan0419/ap2-gen/payment"
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 )
 
 func main() {
@@ -57,7 +58,7 @@ func main() {
 		grpc.UnaryInterceptor(transportGRPC.LoggingInterceptor),
 	)
 	pb.RegisterPaymentServiceServer(grpcServer, transportGRPC.NewPaymentGRPCServer(uc))
-
+	reflection.Register(grpcServer)
 	go func() {
 		log.Printf("Payment gRPC server listening on :%s", grpcPort)
 		if err := grpcServer.Serve(lis); err != nil {

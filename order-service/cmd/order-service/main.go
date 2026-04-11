@@ -18,11 +18,13 @@ import (
 	"order-service/internal/repository/postgres"
 	transportGRPC "order-service/internal/transport/grpc"
 	transportHTTP "order-service/internal/transport/http"
+
 	"order-service/internal/usecase"
 
 	pbOrder "github.com/Aisultan0419/ap2-gen/order"
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 )
 
 func main() {
@@ -63,7 +65,7 @@ func main() {
 	}
 	grpcServer := grpc.NewServer()
 	pbOrder.RegisterOrderServiceServer(grpcServer, transportGRPC.NewOrderGRPCServer(uc))
-
+	reflection.Register(grpcServer)
 	go func() {
 		log.Printf("Order gRPC server listening on :%s", grpcPort)
 		if err := grpcServer.Serve(lis); err != nil {

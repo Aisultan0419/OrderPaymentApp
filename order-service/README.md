@@ -2,83 +2,118 @@
 
 Manages customer orders. Part of the Order & Payment microservices platform.
 
+> In Assignment 2, the internal call to Payment Service was migrated from REST to **gRPC**.  
+> The Order Service also acts as a **gRPC Server** for real-time order status streaming.
+
+---
+
 ## Architecture
 
 ```
-cmd/order-service/main.go          ← Composition Root (manual DI only)
+cmd/order-service/main.go              ← Composition Root (manual DI only)
+cmd/stream-client/main.go              ← CLI client to demo order status streaming
 internal/
-  domain/order.go                  ← Pure domain entity, zero external deps
+  domain/order.go                      ← Pure domain entity, zero external deps
   usecase/
-    interfaces.go                  ← Ports: OrderRepository, PaymentClient
-    order_usecase.go               ← Business logic: Create / Get / Cancel
+    interfaces.go                      ← Ports: OrderRepository, PaymentClient
+    order_usecase.go                   ← Business logic: Create / Get / Cancel / UpdateStatus
   repository/postgres/
-    order_repository.go            ← PostgreSQL adapter (implements OrderRepository port)
+    order_repository.go                ← PostgreSQL adapter (implements OrderRepository port)
   client/
-    payment_client.go              ← HTTP adapter (implements PaymentClient port, 2s timeout)
-  transport/http/
-    handler.go                     ← Thin Gin handlers (parse → usecase → respond)
-    router.go                      ← Route registration + Swagger mount
-docs/docs.go                       ← Swagger spec
-migrations/001_create_orders.sql   ← DB schema
+    payment_client.go                  ← gRPC adapter (implements PaymentClient port)
+  transport/
+    http/
+      handler.go                       ← Thin Gin handlers (parse → usecase → respond)
+      router.go                        ← Route registration + Swagger mount
+    grpc/
+      server.go                        ← gRPC streaming server (SubscribeToOrderUpdates)
+docs/docs.go                           ← Swagger spec
+migrations/001_create_orders.sql       ← DB schema
 ```
 
 ### Dependency Flow
 
 ```
 main.go
-  └─ NewOrderUseCase(repo, paymentClient)
-       ├─ repo           → postgres.NewOrderRepository(db)   [OrderRepository port]
-       └─ paymentClient  → client.NewPaymentServiceClient()  [PaymentClient port]
+  ├─ NewPaymentGRPCClient(addr)         [PaymentClient port — gRPC]
+  ├─ NewOrderUseCase(repo, paymentClient)
+  │    ├─ repo           → postgres.NewOrderRepository(db)
+  │    └─ paymentClient  → client.NewPaymentGRPCClient()
+  ├─ HTTP server  :8080   (Gin)
+  └─ gRPC server  :9090   (streaming)
 ```
 
-Nothing in `domain/` or `usecase/` imports Gin, `database/sql`, or `net/http`.
-All concrete dependencies flow inward from `main.go` only.
+Nothing in `domain/` or `usecase/` imports Gin, `database/sql`, or gRPC.
+
+---
 
 ## Bounded Context
 
 The Order Service owns:
-- Order lifecycle: Pending → Paid / Failed / Cancelled
+- Order lifecycle: `Pending` → `Paid` / `Failed` / `Cancelled`
 - Its own PostgreSQL database (`orders_db`) — never touches `payments_db`
-- Communication with Payment Service **only** through the `PaymentClient` interface
+- Communication with Payment Service **only** through the `PaymentClient` interface (gRPC)
+- Real-time order status streaming to subscribed clients
+
+---
+
+## gRPC Streaming
+
+The Order Service implements `SubscribeToOrderUpdates` — a Server-side Streaming RPC.
+
+**How it works:**
+1. Client connects and sends an `OrderRequest` with an `order_id`
+2. Server polls the database every **1 second** for status changes
+3. Whenever the status changes, it immediately pushes an `OrderStatusUpdate` to the client
+4. Stream closes automatically when order reaches a terminal state (`Paid`, `Failed`, `Cancelled`)
+
+This is tied to **real database changes** — updating the order status via `PATCH /orders/:id/status` triggers an immediate push to all active subscribers.
+
+---
 
 ## Failure Handling
 
-If the Payment Service is unreachable or returns a 5xx:
+If the Payment Service is unreachable or returns a gRPC error:
 
-1. The HTTP client times out after **2 seconds** (hard limit set on `http.Client`).
-2. The Order is marked **"Failed"** in the database (consistent state, never "limbo").
-3. The caller receives **HTTP 503 Service Unavailable**.
+1. The gRPC call returns `codes.Unavailable`
+2. The Order is marked **"Failed"** in the database
+3. The caller receives **HTTP 503 Service Unavailable**
 
-Design decision: marking as "Failed" (rather than leaving as "Pending") means the
-order state is always deterministic after a create attempt. A Pending order always
-means "waiting for payment decision", not "payment call crashed".
+---
 
-## Idempotency (Bonus)
+## HTTP Endpoints
 
-Send `Idempotency-Key: <your-unique-key>` header with `POST /orders`.
-If an order with that key already exists, it is returned immediately without
-creating a duplicate order or calling the Payment Service again.
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/orders` | Create order + authorize payment via gRPC |
+| `POST` | `/orders/pending` | Create order, skip payment (for cancel testing) |
+| `GET` | `/orders/:id` | Get order by ID |
+| `PATCH` | `/orders/:id/cancel` | Cancel a Pending order |
+| `PATCH` | `/orders/:id/status` | Update order status (triggers stream push) |
+| `GET` | `/swagger/index.html` | Swagger UI |
 
-## Endpoints
+## gRPC Endpoints
 
-| Method | Path                  | Description                        |
-|--------|-----------------------|------------------------------------|
-| POST   | /orders               | Create order + authorize payment   |
-| GET    | /orders/:id           | Get order by ID                    |
-| PATCH  | /orders/:id/cancel    | Cancel a Pending order             |
-| GET    | /swagger/index.html   | Swagger UI                         |
+| RPC | Type | Description |
+|---|---|---|
+| `SubscribeToOrderUpdates` | Server-side Streaming | Stream real-time status updates for an order |
+
+---
 
 ## Environment Variables
 
-| Variable              | Default                   | Description                      |
-|-----------------------|---------------------------|----------------------------------|
-| DB_HOST               | localhost                 | PostgreSQL host                  |
-| DB_PORT               | 5432                      | PostgreSQL port                  |
-| DB_USER               | postgres                  | PostgreSQL user                  |
-| DB_PASSWORD           | postgres                  | PostgreSQL password              |
-| DB_NAME               | orders_db                 | PostgreSQL database name         |
-| PORT                  | 8080                      | HTTP listen port                 |
-| PAYMENT_SERVICE_URL   | http://localhost:8081     | Base URL of the Payment Service  |
+| Variable | Default | Description |
+|---|---|---|
+| `DB_HOST` | `localhost` | PostgreSQL host |
+| `DB_PORT` | `5432` | PostgreSQL port |
+| `DB_USER` | `postgres` | PostgreSQL user |
+| `DB_PASSWORD` | `postgres` | PostgreSQL password |
+| `DB_NAME` | `orders_db` | PostgreSQL database name |
+| `PORT` | `8080` | HTTP listen port |
+| `GRPC_PORT` | `9090` | gRPC streaming server port |
+| `PAYMENT_GRPC_ADDR` | `localhost:9091` | gRPC address of Payment Service |
+
+---
 
 ## Running
 
@@ -91,4 +126,16 @@ go mod tidy
 
 # 3. Run
 go run ./cmd/order-service
+
+# 4. (Optional) Run stream client demo
+go run ./cmd/stream-client/main.go <ORDER_ID>
+```
+
+---
+
+## Regenerate Swagger docs
+
+```bash
+go install github.com/swaggo/swag/cmd/swag@latest
+swag init -g cmd/order-service/main.go
 ```
